@@ -78,7 +78,7 @@ def intersect_polygons(
     return ints, mask
 
 
-def compute_area(vert: torch.Tensor) -> torch.Tensor:
+def _compute_area(vert: torch.Tensor) -> torch.Tensor:
     """Compute the area of a batch of polygons.
 
     Args:
@@ -164,7 +164,7 @@ def _sort_vertices(vert: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
 
     # Index mask
     idxmask = torch.arange(9, device=dev).reshape(*batchdims, 9)
-    idxmask = idxmask < num_valid
+    idxmask = idxmask < num_valid.unsqueeze(-1)
 
     # Apply the mask
     indices = torch.where(idxmask, indices, firsts)
@@ -203,14 +203,13 @@ def rect_intersection(vert_a: torch.Tensor, vert_b: torch.Tensor) -> torch.Tenso
     return _sort_vertices(vertices, mask)
 
 
-def get_rect_vert(rect: torch.Tensor, deg: bool = False) -> torch.Tensor:
+def get_rect_vert(rect: torch.Tensor) -> torch.Tensor:
     """Get the vertices of a rectangle.
 
     Args:
         rect (torch.Tensor): A tensor of shape (..., 5) where the last dimension
-            contains the x, y, width, height and angle of the rectangle.
-        deg (bool, optional): Whether the angle specified at the 4th position in the
-            last dimension is in degrees or radians. Defaults to False (radians).
+            contains the x, y, width, height and angle of the rectangle. Angles are
+            in radians, wrt the x axis, counterclockwise.
 
     Returns:
         torch.Tensor: A tensor of shape (..., 4, 2) where the last dimension contains
@@ -223,14 +222,14 @@ def get_rect_vert(rect: torch.Tensor, deg: bool = False) -> torch.Tensor:
     vert = torch.tensor([[1, 1], [-1, 1], [-1, -1], [1, -1]], device=dev) / 2
 
     # Match the batch size(s)
-    nrect = math.prod(rect.shape[:-2])
-    vert = vert.unsqueeze(0).repeat([nrect, 1, 1]).view(rect.shape[:-2] + (4, 2))
+    nrect = math.prod(rect.shape[:-1])
+    vert = vert.unsqueeze(0).repeat([nrect, 1, 1]).view(rect.shape[:-1] + (4, 2))
 
     # Scale the vertices
     vert = vert * rect[..., 2:4].unsqueeze(-2)
 
     # Rotate the vertices
-    a = rect[..., 4] * torch.pi / 180 if deg else rect[..., 4]
+    a = rect[..., 4]
     sin, cos = torch.sin(a), torch.cos(a)
     rot = torch.stack([cos, -sin, sin, cos], dim=-1).view(rect.shape[:-1] + (2, 2))
     vert = vert @ rot
@@ -241,108 +240,23 @@ def get_rect_vert(rect: torch.Tensor, deg: bool = False) -> torch.Tensor:
     return vert
 
 
-def rect_iou(
-    rect_a: torch.Tensor, rect_b: torch.Tensor, deg: bool = False
-) -> torch.Tensor:
+def compute_iou(rect_a: torch.Tensor, rect_b: torch.Tensor) -> torch.Tensor:
     """Compute the intersection over union between two bathes of rectangles.
 
     Args:
         rect_a (torch.Tensor): A tensor of shape (..., 5) where the last dimension
-            contains the x, y, width, height and angle of the rectangle.
+            contains the x, y, width, height and angle of the rectangle. Angles are
+            in radians, wrt the x axis, counterclockwise.
         rect_b (torch.Tensor): Same as rect_a, but for the second batch of rectangles.
             The two batches must have the same shape.
-        deg (bool, optional): Whether the angle specified at the 4th position in the
-            last dimension is in degrees or radians. Defaults to False (radians).
 
     Returns:
         torch.Tensor: A tensor of shape (...) containing the intersection over union
             between the two batches of rectangles.
     """
-    vert_a = get_rect_vert(rect_a, deg=deg)
-    vert_b = get_rect_vert(rect_b, deg=deg)
+    vert_a, vert_b = get_rect_vert(rect_a), get_rect_vert(rect_b)
     inter = rect_intersection(vert_a, vert_b)
-    area = compute_area(inter)
+    area = _compute_area(inter)
     area_a = rect_a[..., 2] * rect_a[..., 3]
     area_b = rect_b[..., 2] * rect_b[..., 3]
-    iou = area / (area_a + area_b - area)
-    return iou
-
-
-def main():
-    import cv2 as cv
-    import numpy as np
-
-    b = 0
-
-    # device = "cuda" if torch.cuda.is_available() else "cpu"
-    device = "cpu"
-
-    rect_ab = [
-        torch.tensor([[256.0, 256.0, 100.0, 100.0, 45.0]], device=device),
-        torch.tensor([[300.0, 200.0, 150.0, 100.0, 0.0]], device=device),
-    ]
-
-    cv.namedWindow("canvas", cv.WINDOW_NORMAL)
-
-    while True:
-        iou = rect_iou(rect_ab[0], rect_ab[1], deg=True)
-        vert_a = get_rect_vert(rect_ab[0], deg=True)
-        vert_b = get_rect_vert(rect_ab[1], deg=True)
-
-        inter = rect_intersection(vert_a, vert_b)
-
-        canvas = np.zeros([512, 512, 3], dtype=np.uint8)
-
-        for i in range(2):
-            color = (0, 0, 255) if i == 0 else (255, 0, 0)
-            vert = vert_a if i == 0 else vert_b
-            vert_np = vert[0].detach().cpu().numpy().astype(np.int32)
-
-            for j in range(4):
-                cv.line(canvas, vert_np[j], vert_np[(j + 1) % 4], color, 2)
-
-        inter_np = inter[0].detach().cpu().numpy().astype(np.int32)
-        for i in range(9):
-            cv.line(canvas, inter_np[i], inter_np[(i + 1) % 9], (255, 255, 255), 1)
-
-        cv.putText(
-            canvas,
-            "iou: {:.2f}".format(iou[0].item()),
-            (10, 30),
-            cv.FONT_HERSHEY_SIMPLEX,
-            1,
-            (255, 255, 255),
-            1,
-        )
-
-        cv.imshow("canvas", canvas)
-
-        k = cv.waitKey(1)
-        if k == ord("p"):
-            break
-        elif k == ord(" "):
-            b = 1 - b
-        elif k == ord("w"):
-            rect_ab[b][0, 1] -= 1
-        elif k == ord("s"):
-            rect_ab[b][0, 1] += 1
-        elif k == ord("a"):
-            rect_ab[b][0, 0] -= 1
-        elif k == ord("d"):
-            rect_ab[b][0, 0] += 1
-        elif k == ord("e"):
-            rect_ab[b][0, 4] += 1
-        elif k == ord("q"):
-            rect_ab[b][0, 4] -= 1
-        elif k == ord("z"):
-            rect_ab[b][0, 2] -= 1
-        elif k == ord("x"):
-            rect_ab[b][0, 2] += 1
-        elif k == ord("r"):
-            rect_ab[b][0, 3] += 1
-        elif k == ord("f"):
-            rect_ab[b][0, 3] -= 1
-
-
-if __name__ == "__main__":
-    main()
+    return area / (area_a + area_b - area)

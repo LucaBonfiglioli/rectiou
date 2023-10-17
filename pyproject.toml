@@ -1,0 +1,53 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "rectiou"
+authors = [
+  { name="Luca Bonfiglioli", email="luca.bonfiglioli@gmail.com" },
+]
+description = "rectiou: vectorized 2d rectangle intersection with pytorch"
+readme = "README.md"
+license = "Unlicense"
+requires-python = ">=3.8"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "License :: OSI Approved :: The Unlicense (Unlicense)",
+    "Natural Language :: English",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Software Development",
+]
+keywords = [
+    "pytorch", "rectangles", "intersection", "vectorized", "efficient", "fast", "bounding box"
+]
+dependencies = [
+    "torch"
+]
+dynamic = [ "version" ]
+
+[project.optional-dependencies]
+tests = [
+    "pytest",
+    "pytest-cov",
+    "opencv-python",
+    "numpy",
+]
+dev = [
+    "black",
+    "flake8",
+]
+build = [
+    "hatch",
+    "build",
+]
+
+[tool.hatch.version]
+path = "rectiou/__init__.py"
